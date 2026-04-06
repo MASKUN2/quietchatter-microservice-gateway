@@ -5,9 +5,8 @@ import io.jsonwebtoken.JwtException
 import io.jsonwebtoken.Jwts
 import io.jsonwebtoken.security.Keys
 import org.springframework.beans.factory.annotation.Value
-import org.springframework.data.redis.core.ReactiveStringRedisTemplate
+import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.stereotype.Service
-import reactor.core.publisher.Mono
 import java.time.Duration
 import java.time.Instant
 import java.util.Date
@@ -20,7 +19,7 @@ class InvalidAuthTokenException(message: String) : RuntimeException(message)
 @Service
 class JwtTokenService(
     @Value("\${jwt.secret-key}") secretKeyString: String,
-    private val redisTemplate: ReactiveStringRedisTemplate
+    private val redisTemplate: StringRedisTemplate
 ) {
     private val key: SecretKey = Keys.hmacShaKeyFor(secretKeyString.toByteArray())
     private val jwtParser = Jwts.parser().verifyWith(key).build()
@@ -52,7 +51,7 @@ class JwtTokenService(
         }
     }
 
-    fun findMemberIdByRefreshTokenId(tokenId: String): Mono<String> {
+    fun findMemberIdByRefreshTokenId(tokenId: String): String? {
         return redisTemplate.opsForValue().get("refresh_token:$tokenId")
     }
 
@@ -65,7 +64,7 @@ class JwtTokenService(
             .compact()
     }
 
-    fun createAndSaveRefreshToken(memberId: String): Mono<String> {
+    fun createAndSaveRefreshToken(memberId: String): String {
         val tokenId = UUID.randomUUID().toString()
         val exp = Date.from(Instant.now().plus(refreshTokenLifeTime))
         val token = Jwts.builder()
@@ -74,11 +73,11 @@ class JwtTokenService(
             .expiration(exp)
             .compact()
         
-        return redisTemplate.opsForValue().set("refresh_token:$tokenId", memberId, refreshTokenLifeTime)
-            .thenReturn(token)
+        redisTemplate.opsForValue().set("refresh_token:$tokenId", memberId, refreshTokenLifeTime)
+        return token
     }
 
-    fun deleteRefreshToken(tokenId: String): Mono<Boolean> {
-        return redisTemplate.delete("refresh_token:$tokenId").map { it > 0 }
+    fun deleteRefreshToken(tokenId: String): Boolean {
+        return redisTemplate.delete("refresh_token:$tokenId")
     }
 }
