@@ -27,8 +27,6 @@ dependencies {
     implementation(platform("org.springframework.cloud:spring-cloud-dependencies:${property("springCloudVersion")}"))
 
     implementation("org.springframework.cloud:spring-cloud-starter-gateway-server-webmvc")
-    implementation("org.springframework.cloud:spring-cloud-starter-consul-discovery")
-
     implementation("org.springframework.boot:spring-boot-starter-actuator")
     implementation("com.github.ben-manes.caffeine:caffeine")
     developmentOnly("org.springframework.boot:spring-boot-docker-compose")

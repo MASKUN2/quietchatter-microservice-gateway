@@ -4,11 +4,9 @@ server:
 spring:
   application:
     name: microservice-api-gateway
-  config:
-    import: "optional:consul:"
   data:
     redis:
-      host: ${CONSUL_HOST:localhost}
+      host: ${REDIS_HOST:localhost}
       port: 6379
   threads:
     virtual:
@@ -19,27 +17,21 @@ spring:
         webmvc:
           routes:
             - id: member-service
-              uri: lb://microservice-member
+              uri: ${MEMBER_SERVICE_URL:http://localhost:8083}
               predicates:
                 - Path=/v1/auth/**,/v1/me/**
             - id: book-service
-              uri: lb://microservice-book
+              uri: ${BOOK_SERVICE_URL:http://localhost:8081}
               predicates:
                 - Path=/v1/books/**
             - id: talk-service
-              uri: lb://microservice-talk
+              uri: ${TALK_SERVICE_URL:http://localhost:8084}
               predicates:
                 - Path=/v1/talks/**,/v1/reactions/**
             - id: customer-service
-              uri: lb://microservice-customer
+              uri: ${CUSTOMER_SERVICE_URL:http://localhost:8082}
               predicates:
                 - Path=/v1/customer/**
-    consul:
-      host: ${CONSUL_HOST:localhost}
-      port: 8500
-      discovery:
-        service-name: microservice-api-gateway
-        instance-id: ${spring.application.name}:${server.port}
 
 jwt:
   secret-key: your-very-long-secret-key-at-least-32-chars-long
