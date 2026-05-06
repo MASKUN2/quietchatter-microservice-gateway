@@ -17,10 +17,16 @@ import java.net.URI
 class AuthenticationFilter(
     private val jwtTokenService: JwtTokenService,
     private val objectMapper: ObjectMapper,
-    private val cookieProperties: GatewayCookieProperties
+    private val cookieProperties: GatewayCookieProperties,
+    private val tokenRefreshClient: TokenRefreshClient
 ) : OncePerRequestFilter() {
 
     private val log = LoggerFactory.getLogger(javaClass)
+
+    companion object {
+        private const val ACCESS_TOKEN_MAX_AGE_SECONDS = 30L * 60
+        private const val REFRESH_TOKEN_MAX_AGE_SECONDS = 30L * 24 * 60 * 60
+    }
 
     override fun doFilterInternal(
         request: HttpServletRequest,
@@ -68,31 +74,20 @@ class AuthenticationFilter(
             return
         }
 
-        try {
-            val tokenId = jwtTokenService.parseRefreshTokenAndGetTokenId(refreshToken)
-            val memberId = jwtTokenService.getAndDeleteMemberIdByRefreshTokenId(tokenId)
-
-            if (memberId != null) {
-                val newAccessToken = jwtTokenService.createNewAccessToken(memberId)
-                val newRefreshToken = jwtTokenService.createAndSaveRefreshToken(memberId)
-
-                addTokenCookies(response, newAccessToken, newRefreshToken)
-                request.setMemberIdHeader(memberId)
-                filterChain.doFilter(request, response)
-            } else {
-                clearTokenCookies(response)
-                filterChain.doFilter(request, response)
-            }
-        } catch (e: Exception) {
-            log.error("Refresh token validation failed: {}", e.message)
+        val result = tokenRefreshClient.rotate(refreshToken)
+        if (result != null) {
+            addTokenCookies(response, result.accessToken, result.refreshToken)
+            request.setMemberIdHeader(result.memberId)
+            filterChain.doFilter(request, response)
+        } else {
             clearTokenCookies(response)
             filterChain.doFilter(request, response)
         }
     }
 
     private fun addTokenCookies(response: HttpServletResponse, accessToken: String, refreshToken: String) {
-        response.addHeader(HttpHeaders.SET_COOKIE, buildCookieHeader("ACCESS_TOKEN", accessToken, jwtTokenService.accessTokenLifeTime.seconds))
-        response.addHeader(HttpHeaders.SET_COOKIE, buildCookieHeader("REFRESH_TOKEN", refreshToken, jwtTokenService.refreshTokenLifeTime.seconds))
+        response.addHeader(HttpHeaders.SET_COOKIE, buildCookieHeader("ACCESS_TOKEN", accessToken, ACCESS_TOKEN_MAX_AGE_SECONDS))
+        response.addHeader(HttpHeaders.SET_COOKIE, buildCookieHeader("REFRESH_TOKEN", refreshToken, REFRESH_TOKEN_MAX_AGE_SECONDS))
     }
 
     private fun clearTokenCookies(response: HttpServletResponse) {

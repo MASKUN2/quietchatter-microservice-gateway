@@ -14,14 +14,14 @@ import org.mockito.Mockito.*
 import org.springframework.http.HttpStatus
 import org.springframework.web.context.request.RequestContextHolder
 import org.springframework.web.context.request.ServletRequestAttributes
-import java.time.Duration
 
 class AuthenticationFilterTest {
 
     private val jwtTokenService = mock(JwtTokenService::class.java)
+    private val tokenRefreshClient = mock(TokenRefreshClient::class.java)
     private val objectMapper = ObjectMapper()
     private val cookieProperties = GatewayCookieProperties(domain = null, secure = false, sameSite = "Lax")
-    private val filter = AuthenticationFilter(jwtTokenService, objectMapper, cookieProperties)
+    private val filter = AuthenticationFilter(jwtTokenService, objectMapper, cookieProperties, tokenRefreshClient)
     private val request = mock(HttpServletRequest::class.java)
     private val response = mock(HttpServletResponse::class.java)
     private val filterChain = mock(FilterChain::class.java)
@@ -30,8 +30,6 @@ class AuthenticationFilterTest {
     fun setUp() {
         val attributes = ServletRequestAttributes(request)
         RequestContextHolder.setRequestAttributes(attributes)
-        `when`(jwtTokenService.accessTokenLifeTime).thenReturn(Duration.ofMinutes(30))
-        `when`(jwtTokenService.refreshTokenLifeTime).thenReturn(Duration.ofDays(30))
     }
 
     @AfterEach
@@ -40,33 +38,28 @@ class AuthenticationFilterTest {
     }
 
     @Test
-    fun `request without access token but with valid refresh token should attempt to refresh`() {
+    fun `request without access token but with valid refresh token rotates via member service`() {
         // given
         `when`(request.requestURI).thenReturn("/api/members/me")
         val refreshCookie = Cookie("REFRESH_TOKEN", "valid-refresh-token")
         `when`(request.cookies).thenReturn(arrayOf(refreshCookie))
         `when`(request.getHeader(anyString())).thenReturn(null)
 
-        val tokenId = "some-token-id"
-        val memberId = "member-123"
-        `when`(jwtTokenService.parseRefreshTokenAndGetTokenId("valid-refresh-token")).thenReturn(tokenId)
-        `when`(jwtTokenService.getAndDeleteMemberIdByRefreshTokenId(tokenId)).thenReturn(memberId)
-        `when`(jwtTokenService.createNewAccessToken(memberId)).thenReturn("new-access-token")
-        `when`(jwtTokenService.createAndSaveRefreshToken(memberId)).thenReturn("new-refresh-token")
+        val rotationResult = TokenRotationResult("new-access", "new-refresh", "member-123")
+        `when`(tokenRefreshClient.rotate("valid-refresh-token")).thenReturn(rotationResult)
 
         // when
         filter.doFilter(request, response, filterChain)
 
         // then
-        verify(jwtTokenService).parseRefreshTokenAndGetTokenId("valid-refresh-token")
-        verify(jwtTokenService).getAndDeleteMemberIdByRefreshTokenId(tokenId)
+        verify(tokenRefreshClient).rotate("valid-refresh-token")
         verify(filterChain).doFilter(any(GatewayHeaderRequestWrapper::class.java), eq(response))
     }
 
     @Test
-    fun `request without token should pass through without X-Member-Id header`() {
+    fun `request without token should pass through as anonymous`() {
         // given
-        `when`(request.requestURI).thenReturn("/api/auth/logout")
+        `when`(request.requestURI).thenReturn("/api/auth/me")
         `when`(request.cookies).thenReturn(null)
         `when`(request.getHeader(anyString())).thenReturn(null)
 
@@ -76,69 +69,47 @@ class AuthenticationFilterTest {
         // then
         verify(filterChain).doFilter(any(), eq(response))
         verify(response, never()).status = HttpStatus.UNAUTHORIZED.value()
+        verifyNoInteractions(tokenRefreshClient)
     }
 
     @Test
-    fun `request with only stale refresh token cookie (not in Redis) should pass through as anonymous and clear cookies`() {
-        // given - 리프레시 토큰 쿠키만 있고 Redis에는 항목 없음 (만료된 세션)
+    fun `request with stale refresh token (member service returns null) should pass through as anonymous`() {
+        // given - 리프레시 토큰 쿠키 있지만 멤버 서비스 로테이션 실패 (세션 만료)
         `when`(request.requestURI).thenReturn("/api/auth/me")
         val refreshCookie = Cookie("REFRESH_TOKEN", "stale-refresh-token")
         `when`(request.cookies).thenReturn(arrayOf(refreshCookie))
         `when`(request.getHeader(anyString())).thenReturn(null)
 
-        val tokenId = "stale-token-id"
-        `when`(jwtTokenService.parseRefreshTokenAndGetTokenId("stale-refresh-token")).thenReturn(tokenId)
-        `when`(jwtTokenService.getAndDeleteMemberIdByRefreshTokenId(tokenId)).thenReturn(null)
+        `when`(tokenRefreshClient.rotate("stale-refresh-token")).thenReturn(null)
 
         // when
         filter.doFilter(request, response, filterChain)
 
-        // then - 어나니머스로 통과, 401 반환 없음
+        // then - 어나니머스로 통과, 쿠키 클리어
         verify(filterChain).doFilter(any(GatewayHeaderRequestWrapper::class.java), eq(response))
         verify(response, never()).status = HttpStatus.UNAUTHORIZED.value()
         verify(response, atLeastOnce()).addHeader(eq("Set-Cookie"), contains("Max-Age=0"))
     }
 
     @Test
-    fun `request with expired access token and stale refresh token should pass through as anonymous`() {
-        // given - 액세스 토큰 만료 + 리프레시 토큰도 Redis에 없음
+    fun `request with expired access token falls back to token refresh via member service`() {
+        // given
         `when`(request.requestURI).thenReturn("/api/auth/me")
         val accessCookie = Cookie("ACCESS_TOKEN", "expired-access-token")
-        val refreshCookie = Cookie("REFRESH_TOKEN", "stale-refresh-token")
+        val refreshCookie = Cookie("REFRESH_TOKEN", "valid-refresh-token")
         `when`(request.cookies).thenReturn(arrayOf(accessCookie, refreshCookie))
 
         `when`(jwtTokenService.validateAndGetMemberId("expired-access-token"))
             .thenThrow(ExpiredAuthTokenException("Token expired"))
-        val tokenId = "stale-token-id"
-        `when`(jwtTokenService.parseRefreshTokenAndGetTokenId("stale-refresh-token")).thenReturn(tokenId)
-        `when`(jwtTokenService.getAndDeleteMemberIdByRefreshTokenId(tokenId)).thenReturn(null)
+        val rotationResult = TokenRotationResult("new-access", "new-refresh", "member-123")
+        `when`(tokenRefreshClient.rotate("valid-refresh-token")).thenReturn(rotationResult)
 
         // when
         filter.doFilter(request, response, filterChain)
 
-        // then - 어나니머스로 통과, 401 반환 없음
+        // then
+        verify(tokenRefreshClient).rotate("valid-refresh-token")
         verify(filterChain).doFilter(any(GatewayHeaderRequestWrapper::class.java), eq(response))
-        verify(response, never()).status = HttpStatus.UNAUTHORIZED.value()
-    }
-
-    @Test
-    fun `request with invalid refresh token should pass through as anonymous and clear cookies`() {
-        // given - 리프레시 토큰 파싱 자체가 실패 (위변조 또는 손상)
-        `when`(request.requestURI).thenReturn("/api/auth/me")
-        val refreshCookie = Cookie("REFRESH_TOKEN", "invalid-refresh-token")
-        `when`(request.cookies).thenReturn(arrayOf(refreshCookie))
-        `when`(request.getHeader(anyString())).thenReturn(null)
-
-        `when`(jwtTokenService.parseRefreshTokenAndGetTokenId("invalid-refresh-token"))
-            .thenThrow(InvalidAuthTokenException("Invalid token"))
-
-        // when
-        filter.doFilter(request, response, filterChain)
-
-        // then - 어나니머스로 통과, 401 반환 없음
-        verify(filterChain).doFilter(any(GatewayHeaderRequestWrapper::class.java), eq(response))
-        verify(response, never()).status = HttpStatus.UNAUTHORIZED.value()
-        verify(response, atLeastOnce()).addHeader(eq("Set-Cookie"), contains("Max-Age=0"))
     }
 
     @Test

@@ -28,10 +28,6 @@ spec:
           env:
             - name: SPRING_PROFILES_ACTIVE
               value: prod
-            - name: SPRING_DATA_REDIS_HOST
-              value: redis.quietchatter.svc.cluster.local
-            - name: SPRING_DATA_REDIS_PORT
-              value: "6379"
             - name: JWT_SECRET_KEY
               valueFrom:
                 secretKeyRef:
