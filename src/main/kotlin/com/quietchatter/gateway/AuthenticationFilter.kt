@@ -75,14 +75,19 @@ class AuthenticationFilter(
             return
         }
 
-        val result = tokenRefreshClient.rotate(refreshToken)
-        if (result != null) {
-            addTokenCookies(response, result.accessToken, result.refreshToken)
-            request.setMemberIdHeader(result.memberId)
-            filterChain.doFilter(request, response)
-        } else {
-            clearTokenCookies(response)
-            filterChain.doFilter(request, response)
+        when (val outcome = tokenRefreshClient.rotate(refreshToken)) {
+            is RefreshOutcome.Success -> {
+                addTokenCookies(response, outcome.result.accessToken, outcome.result.refreshToken)
+                request.setMemberIdHeader(outcome.result.memberId)
+                filterChain.doFilter(request, response)
+            }
+            is RefreshOutcome.SessionExpired -> {
+                clearTokenCookies(response)
+                filterChain.doFilter(request, response)
+            }
+            is RefreshOutcome.Unavailable -> {
+                filterChain.doFilter(request, response)
+            }
         }
     }
 

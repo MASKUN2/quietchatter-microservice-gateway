@@ -46,7 +46,7 @@ class AuthenticationFilterTest {
         `when`(request.getHeader(anyString())).thenReturn(null)
 
         val rotationResult = TokenRotationResult("new-access", "new-refresh", "member-123")
-        `when`(tokenRefreshClient.rotate("valid-refresh-token")).thenReturn(rotationResult)
+        `when`(tokenRefreshClient.rotate("valid-refresh-token")).thenReturn(RefreshOutcome.Success(rotationResult))
 
         // when
         filter.doFilter(request, response, filterChain)
@@ -73,14 +73,14 @@ class AuthenticationFilterTest {
     }
 
     @Test
-    fun `request with stale refresh token (member service returns null) should pass through as anonymous`() {
-        // given - 리프레시 토큰 쿠키 있지만 멤버 서비스 로테이션 실패 (세션 만료)
+    fun `session expired refresh token should clear cookies and pass through as anonymous`() {
+        // given
         `when`(request.requestURI).thenReturn("/api/auth/me")
         val refreshCookie = Cookie("REFRESH_TOKEN", "stale-refresh-token")
         `when`(request.cookies).thenReturn(arrayOf(refreshCookie))
         `when`(request.getHeader(anyString())).thenReturn(null)
 
-        `when`(tokenRefreshClient.rotate("stale-refresh-token")).thenReturn(null)
+        `when`(tokenRefreshClient.rotate("stale-refresh-token")).thenReturn(RefreshOutcome.SessionExpired)
 
         // when
         filter.doFilter(request, response, filterChain)
@@ -89,6 +89,24 @@ class AuthenticationFilterTest {
         verify(filterChain).doFilter(any(GatewayHeaderRequestWrapper::class.java), eq(response))
         verify(response, never()).status = HttpStatus.UNAUTHORIZED.value()
         verify(response, atLeastOnce()).addHeader(eq("Set-Cookie"), contains("Max-Age=0"))
+    }
+
+    @Test
+    fun `member service unavailable should keep cookies and pass through as anonymous`() {
+        // given
+        `when`(request.requestURI).thenReturn("/api/auth/me")
+        val refreshCookie = Cookie("REFRESH_TOKEN", "valid-refresh-token")
+        `when`(request.cookies).thenReturn(arrayOf(refreshCookie))
+        `when`(request.getHeader(anyString())).thenReturn(null)
+
+        `when`(tokenRefreshClient.rotate("valid-refresh-token")).thenReturn(RefreshOutcome.Unavailable)
+
+        // when
+        filter.doFilter(request, response, filterChain)
+
+        // then - 어나니머스로 통과, 쿠키 클리어 없음
+        verify(filterChain).doFilter(any(GatewayHeaderRequestWrapper::class.java), eq(response))
+        verify(response, never()).addHeader(eq("Set-Cookie"), contains("Max-Age=0"))
     }
 
     @Test
@@ -102,7 +120,7 @@ class AuthenticationFilterTest {
         `when`(jwtTokenService.validateAndGetMemberId("expired-access-token"))
             .thenThrow(ExpiredAuthTokenException("Token expired"))
         val rotationResult = TokenRotationResult("new-access", "new-refresh", "member-123")
-        `when`(tokenRefreshClient.rotate("valid-refresh-token")).thenReturn(rotationResult)
+        `when`(tokenRefreshClient.rotate("valid-refresh-token")).thenReturn(RefreshOutcome.Success(rotationResult))
 
         // when
         filter.doFilter(request, response, filterChain)
