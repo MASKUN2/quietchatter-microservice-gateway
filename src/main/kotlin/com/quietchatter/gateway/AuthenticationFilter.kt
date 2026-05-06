@@ -16,7 +16,8 @@ import java.net.URI
 @Component
 class AuthenticationFilter(
     private val jwtTokenService: JwtTokenService,
-    private val objectMapper: ObjectMapper
+    private val objectMapper: ObjectMapper,
+    private val cookieProperties: GatewayCookieProperties
 ) : OncePerRequestFilter() {
 
     private val log = LoggerFactory.getLogger(javaClass)
@@ -69,55 +70,42 @@ class AuthenticationFilter(
 
         try {
             val tokenId = jwtTokenService.parseRefreshTokenAndGetTokenId(refreshToken)
-            val memberId = jwtTokenService.findMemberIdByRefreshTokenId(tokenId)
+            val memberId = jwtTokenService.getAndDeleteMemberIdByRefreshTokenId(tokenId)
 
             if (memberId != null) {
                 val newAccessToken = jwtTokenService.createNewAccessToken(memberId)
-                jwtTokenService.deleteRefreshToken(tokenId)
                 val newRefreshToken = jwtTokenService.createAndSaveRefreshToken(memberId)
 
-                addTokenCookies(request, response, newAccessToken, newRefreshToken)
+                addTokenCookies(response, newAccessToken, newRefreshToken)
                 request.setMemberIdHeader(memberId)
                 filterChain.doFilter(request, response)
             } else {
-                clearTokenCookies(request, response)
+                clearTokenCookies(response)
                 filterChain.doFilter(request, response)
             }
         } catch (e: Exception) {
             log.error("Refresh token validation failed: {}", e.message)
-            clearTokenCookies(request, response)
+            clearTokenCookies(response)
             filterChain.doFilter(request, response)
         }
     }
 
-    private fun clearTokenCookies(request: HttpServletRequest, response: HttpServletResponse) {
-        val isSecure = request.isSecure
-        val accessCookieHeader = StringBuilder("ACCESS_TOKEN=; Path=/; HttpOnly; Max-Age=0")
-        if (isSecure) accessCookieHeader.append("; Secure")
-        accessCookieHeader.append("; SameSite=Lax")
-        response.addHeader(HttpHeaders.SET_COOKIE, accessCookieHeader.toString())
-
-        val refreshCookieHeader = StringBuilder("REFRESH_TOKEN=; Path=/; HttpOnly; Max-Age=0")
-        if (isSecure) refreshCookieHeader.append("; Secure")
-        refreshCookieHeader.append("; SameSite=Lax")
-        response.addHeader(HttpHeaders.SET_COOKIE, refreshCookieHeader.toString())
+    private fun addTokenCookies(response: HttpServletResponse, accessToken: String, refreshToken: String) {
+        response.addHeader(HttpHeaders.SET_COOKIE, buildCookieHeader("ACCESS_TOKEN", accessToken, jwtTokenService.accessTokenLifeTime.seconds))
+        response.addHeader(HttpHeaders.SET_COOKIE, buildCookieHeader("REFRESH_TOKEN", refreshToken, jwtTokenService.refreshTokenLifeTime.seconds))
     }
 
-    private fun addTokenCookies(request: HttpServletRequest, response: HttpServletResponse, accessToken: String, refreshToken: String) {
-        val isSecure = request.isSecure
+    private fun clearTokenCookies(response: HttpServletResponse) {
+        response.addHeader(HttpHeaders.SET_COOKIE, buildCookieHeader("ACCESS_TOKEN", "", 0))
+        response.addHeader(HttpHeaders.SET_COOKIE, buildCookieHeader("REFRESH_TOKEN", "", 0))
+    }
 
-        // Jakarta Servlet Cookie는 SameSite를 직접 지원하지 않으므로 헤더를 직접 설정하거나 
-        // 응답 래퍼를 사용해야 하지만, 여기서는 가장 안정적인 Set-Cookie 헤더 직접 추가 방식을 사용합니다.
-        
-        val accessCookieHeader = StringBuilder("ACCESS_TOKEN=$accessToken; Path=/; HttpOnly; Max-Age=${jwtTokenService.accessTokenLifeTime.seconds}")
-        if (isSecure) accessCookieHeader.append("; Secure")
-        accessCookieHeader.append("; SameSite=Lax")
-        response.addHeader(HttpHeaders.SET_COOKIE, accessCookieHeader.toString())
-
-        val refreshCookieHeader = StringBuilder("REFRESH_TOKEN=$refreshToken; Path=/; HttpOnly; Max-Age=${jwtTokenService.refreshTokenLifeTime.seconds}")
-        if (isSecure) refreshCookieHeader.append("; Secure")
-        refreshCookieHeader.append("; SameSite=Lax")
-        response.addHeader(HttpHeaders.SET_COOKIE, refreshCookieHeader.toString())
+    private fun buildCookieHeader(name: String, value: String, maxAge: Long): String {
+        val sb = StringBuilder("$name=$value; Path=/; HttpOnly; Max-Age=$maxAge")
+        if (cookieProperties.secure) sb.append("; Secure")
+        cookieProperties.domain?.let { sb.append("; Domain=$it") }
+        sb.append("; SameSite=${cookieProperties.sameSite}")
+        return sb.toString()
     }
 
     private fun extractAccessToken(request: HttpServletRequest): String? {

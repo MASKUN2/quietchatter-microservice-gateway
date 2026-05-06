@@ -20,7 +20,8 @@ class AuthenticationFilterTest {
 
     private val jwtTokenService = mock(JwtTokenService::class.java)
     private val objectMapper = ObjectMapper()
-    private val filter = AuthenticationFilter(jwtTokenService, objectMapper)
+    private val cookieProperties = GatewayCookieProperties(domain = null, secure = false, sameSite = "Lax")
+    private val filter = AuthenticationFilter(jwtTokenService, objectMapper, cookieProperties)
     private val request = mock(HttpServletRequest::class.java)
     private val response = mock(HttpServletResponse::class.java)
     private val filterChain = mock(FilterChain::class.java)
@@ -49,7 +50,7 @@ class AuthenticationFilterTest {
         val tokenId = "some-token-id"
         val memberId = "member-123"
         `when`(jwtTokenService.parseRefreshTokenAndGetTokenId("valid-refresh-token")).thenReturn(tokenId)
-        `when`(jwtTokenService.findMemberIdByRefreshTokenId(tokenId)).thenReturn(memberId)
+        `when`(jwtTokenService.getAndDeleteMemberIdByRefreshTokenId(tokenId)).thenReturn(memberId)
         `when`(jwtTokenService.createNewAccessToken(memberId)).thenReturn("new-access-token")
         `when`(jwtTokenService.createAndSaveRefreshToken(memberId)).thenReturn("new-refresh-token")
 
@@ -58,7 +59,7 @@ class AuthenticationFilterTest {
 
         // then
         verify(jwtTokenService).parseRefreshTokenAndGetTokenId("valid-refresh-token")
-        verify(jwtTokenService).findMemberIdByRefreshTokenId(tokenId)
+        verify(jwtTokenService).getAndDeleteMemberIdByRefreshTokenId(tokenId)
         verify(filterChain).doFilter(any(GatewayHeaderRequestWrapper::class.java), eq(response))
     }
 
@@ -84,11 +85,10 @@ class AuthenticationFilterTest {
         val refreshCookie = Cookie("REFRESH_TOKEN", "stale-refresh-token")
         `when`(request.cookies).thenReturn(arrayOf(refreshCookie))
         `when`(request.getHeader(anyString())).thenReturn(null)
-        `when`(request.isSecure).thenReturn(false)
 
         val tokenId = "stale-token-id"
         `when`(jwtTokenService.parseRefreshTokenAndGetTokenId("stale-refresh-token")).thenReturn(tokenId)
-        `when`(jwtTokenService.findMemberIdByRefreshTokenId(tokenId)).thenReturn(null)
+        `when`(jwtTokenService.getAndDeleteMemberIdByRefreshTokenId(tokenId)).thenReturn(null)
 
         // when
         filter.doFilter(request, response, filterChain)
@@ -96,7 +96,6 @@ class AuthenticationFilterTest {
         // then - 어나니머스로 통과, 401 반환 없음
         verify(filterChain).doFilter(any(GatewayHeaderRequestWrapper::class.java), eq(response))
         verify(response, never()).status = HttpStatus.UNAUTHORIZED.value()
-        // 만료 쿠키 클리어 확인
         verify(response, atLeastOnce()).addHeader(eq("Set-Cookie"), contains("Max-Age=0"))
     }
 
@@ -107,13 +106,12 @@ class AuthenticationFilterTest {
         val accessCookie = Cookie("ACCESS_TOKEN", "expired-access-token")
         val refreshCookie = Cookie("REFRESH_TOKEN", "stale-refresh-token")
         `when`(request.cookies).thenReturn(arrayOf(accessCookie, refreshCookie))
-        `when`(request.isSecure).thenReturn(false)
 
         `when`(jwtTokenService.validateAndGetMemberId("expired-access-token"))
             .thenThrow(ExpiredAuthTokenException("Token expired"))
         val tokenId = "stale-token-id"
         `when`(jwtTokenService.parseRefreshTokenAndGetTokenId("stale-refresh-token")).thenReturn(tokenId)
-        `when`(jwtTokenService.findMemberIdByRefreshTokenId(tokenId)).thenReturn(null)
+        `when`(jwtTokenService.getAndDeleteMemberIdByRefreshTokenId(tokenId)).thenReturn(null)
 
         // when
         filter.doFilter(request, response, filterChain)
@@ -130,7 +128,6 @@ class AuthenticationFilterTest {
         val refreshCookie = Cookie("REFRESH_TOKEN", "invalid-refresh-token")
         `when`(request.cookies).thenReturn(arrayOf(refreshCookie))
         `when`(request.getHeader(anyString())).thenReturn(null)
-        `when`(request.isSecure).thenReturn(false)
 
         `when`(jwtTokenService.parseRefreshTokenAndGetTokenId("invalid-refresh-token"))
             .thenThrow(InvalidAuthTokenException("Invalid token"))

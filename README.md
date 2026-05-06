@@ -75,9 +75,11 @@ AuthenticationFilter(OncePerRequestFilter)가 모든 요청을 검사한다.
 2. ACCESS_TOKEN 쿠키 확인 후 없으면 Authorization: Bearer 헤더 확인
 3. Access Token 유효: X-Member-Id에 memberId를 담아 다운스트림으로 전달
 4. Access Token 없음: X-Member-Id 헤더 없이 다운스트림으로 전달 (어나니머스)
-5. Access Token 만료: REFRESH_TOKEN 쿠키로 Redis 대조 후 토큰 갱신 및 쿠키 재발급
+5. Access Token 만료: REFRESH_TOKEN 쿠키의 tokenId로 Redis GETDEL 원자적 실행. 성공 시 신규 토큰 발급 및 쿠키 재발급
 6. 갱신 토큰 없음 또는 Redis 항목 없음(세션 완전 만료): 만료 쿠키 클리어 후 어나니머스로 통과
 7. 토큰 서명 무효: JSON 에러 응답 (401 UNAUTHORIZED)
+
+쿠키 속성은 COOKIE_DOMAIN / COOKIE_SECURE 환경변수로 제어한다(app.cookie.* 설정). 로컬 기본값은 domain 미설정, secure=false.
 
 에러 응답 형식:
 

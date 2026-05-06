@@ -41,6 +41,10 @@ jwt:
   secret-key: ${JWT_SECRET_KEY:your-very-long-secret-key-at-least-32-chars-long}
 
 app:
+  cookie:
+    domain: ${COOKIE_DOMAIN:}
+    secure: ${COOKIE_SECURE:false}
+    same-site: Lax
   cors:
     allowed-origins:
       - "http://localhost:5173"

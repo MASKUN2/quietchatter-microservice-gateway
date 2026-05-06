@@ -51,8 +51,8 @@ class JwtTokenService(
         }
     }
 
-    fun findMemberIdByRefreshTokenId(tokenId: String): String? {
-        return redisTemplate.opsForValue().get("refresh_token:$tokenId")
+    fun getAndDeleteMemberIdByRefreshTokenId(tokenId: String): String? {
+        return redisTemplate.opsForValue().getAndDelete("refresh_token:$tokenId")
     }
 
     fun createNewAccessToken(memberId: String): String {
@@ -77,7 +77,4 @@ class JwtTokenService(
         return token
     }
 
-    fun deleteRefreshToken(tokenId: String): Boolean {
-        return redisTemplate.delete("refresh_token:$tokenId")
-    }
 }

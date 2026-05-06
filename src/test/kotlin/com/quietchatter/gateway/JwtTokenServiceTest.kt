@@ -50,24 +50,25 @@ class JwtTokenServiceTest {
     }
 
     @Test
-    fun `find member id by refresh token id`() {
+    fun `get and delete member id by refresh token id atomically`() {
         val tokenId = "some-token-id"
         val memberId = "test-member-123"
-        `when`(valueOperations.get("refresh_token:$tokenId")).thenReturn(memberId)
-        
-        val result = jwtTokenService.findMemberIdByRefreshTokenId(tokenId)
-        
+        `when`(valueOperations.getAndDelete("refresh_token:$tokenId")).thenReturn(memberId)
+
+        val result = jwtTokenService.getAndDeleteMemberIdByRefreshTokenId(tokenId)
+
         assertEquals(memberId, result)
+        verify(valueOperations).getAndDelete("refresh_token:$tokenId")
     }
 
     @Test
-    fun `delete refresh token`() {
-        val tokenId = "some-token-id"
-        `when`(redisTemplate.delete("refresh_token:$tokenId")).thenReturn(true)
-        
-        val result = jwtTokenService.deleteRefreshToken(tokenId)
-        
-        assertTrue(result)
+    fun `get and delete returns null when token not in Redis`() {
+        val tokenId = "expired-token-id"
+        `when`(valueOperations.getAndDelete("refresh_token:$tokenId")).thenReturn(null)
+
+        val result = jwtTokenService.getAndDeleteMemberIdByRefreshTokenId(tokenId)
+
+        assertNull(result)
     }
 
     @Test
