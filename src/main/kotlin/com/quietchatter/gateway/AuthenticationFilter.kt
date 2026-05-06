@@ -8,6 +8,8 @@ import org.slf4j.LoggerFactory
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
+import org.springframework.http.ResponseCookie
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Component
 import org.springframework.web.filter.OncePerRequestFilter
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder
@@ -18,15 +20,14 @@ class AuthenticationFilter(
     private val jwtTokenService: JwtTokenService,
     private val objectMapper: ObjectMapper,
     private val cookieProperties: GatewayCookieProperties,
-    private val tokenRefreshClient: TokenRefreshClient
+    private val tokenRefreshClient: TokenRefreshClient,
+    @Value("\${app.token.access-lifetime-minutes:30}") accessLifetimeMinutes: Long,
+    @Value("\${app.token.refresh-lifetime-days:30}") refreshLifetimeDays: Long
 ) : OncePerRequestFilter() {
 
     private val log = LoggerFactory.getLogger(javaClass)
-
-    companion object {
-        private const val ACCESS_TOKEN_MAX_AGE_SECONDS = 30L * 60
-        private const val REFRESH_TOKEN_MAX_AGE_SECONDS = 30L * 24 * 60 * 60
-    }
+    private val accessTokenMaxAge = accessLifetimeMinutes * 60
+    private val refreshTokenMaxAge = refreshLifetimeDays * 24 * 60 * 60
 
     override fun doFilterInternal(
         request: HttpServletRequest,
@@ -86,8 +87,8 @@ class AuthenticationFilter(
     }
 
     private fun addTokenCookies(response: HttpServletResponse, accessToken: String, refreshToken: String) {
-        response.addHeader(HttpHeaders.SET_COOKIE, buildCookieHeader("ACCESS_TOKEN", accessToken, ACCESS_TOKEN_MAX_AGE_SECONDS))
-        response.addHeader(HttpHeaders.SET_COOKIE, buildCookieHeader("REFRESH_TOKEN", refreshToken, REFRESH_TOKEN_MAX_AGE_SECONDS))
+        response.addHeader(HttpHeaders.SET_COOKIE, buildCookieHeader("ACCESS_TOKEN", accessToken, accessTokenMaxAge))
+        response.addHeader(HttpHeaders.SET_COOKIE, buildCookieHeader("REFRESH_TOKEN", refreshToken, refreshTokenMaxAge))
     }
 
     private fun clearTokenCookies(response: HttpServletResponse) {
@@ -96,11 +97,14 @@ class AuthenticationFilter(
     }
 
     private fun buildCookieHeader(name: String, value: String, maxAge: Long): String {
-        val sb = StringBuilder("$name=$value; Path=/; HttpOnly; Max-Age=$maxAge")
-        if (cookieProperties.secure) sb.append("; Secure")
-        cookieProperties.domain?.let { sb.append("; Domain=$it") }
-        sb.append("; SameSite=${cookieProperties.sameSite}")
-        return sb.toString()
+        val builder = ResponseCookie.from(name, value)
+            .path("/")
+            .httpOnly(true)
+            .maxAge(maxAge)
+            .secure(cookieProperties.secure)
+            .sameSite(cookieProperties.sameSite)
+        cookieProperties.domain?.let { builder.domain(it) }
+        return builder.build().toString()
     }
 
     private fun extractAccessToken(request: HttpServletRequest): String? {

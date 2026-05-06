@@ -21,7 +21,7 @@ class AuthenticationFilterTest {
     private val tokenRefreshClient = mock(TokenRefreshClient::class.java)
     private val objectMapper = ObjectMapper()
     private val cookieProperties = GatewayCookieProperties(domain = null, secure = false, sameSite = "Lax")
-    private val filter = AuthenticationFilter(jwtTokenService, objectMapper, cookieProperties, tokenRefreshClient)
+    private val filter = AuthenticationFilter(jwtTokenService, objectMapper, cookieProperties, tokenRefreshClient, 30L, 30L)
     private val request = mock(HttpServletRequest::class.java)
     private val response = mock(HttpServletResponse::class.java)
     private val filterChain = mock(FilterChain::class.java)

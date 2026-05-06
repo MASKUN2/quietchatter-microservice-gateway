@@ -37,6 +37,9 @@ jwt:
   secret-key: ${JWT_SECRET_KEY:your-very-long-secret-key-at-least-32-chars-long}
 
 app:
+  token:
+    access-lifetime-minutes: ${TOKEN_ACCESS_LIFETIME_MINUTES:30}
+    refresh-lifetime-days: ${TOKEN_REFRESH_LIFETIME_DAYS:30}
   cookie:
     domain: ${COOKIE_DOMAIN:}
     secure: ${COOKIE_SECURE:false}
