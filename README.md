@@ -7,7 +7,6 @@ QuietChatter 프로젝트의 API Gateway 서비스. 모든 외부 HTTP 요청의
 - 언어: Kotlin 1.9.25
 - 프레임워크: Spring Boot 3.5.13, Spring Cloud Gateway MVC (Servlet 기반)
 - 런타임: JDK 21 Virtual Threads 활성화
-- 데이터 저장소: Redis (Refresh Token 관리)
 - 포트: 8080
 
 ## 환경 변수 및 보안
@@ -21,8 +20,8 @@ QuietChatter 프로젝트의 API Gateway 서비스. 모든 외부 HTTP 요청의
 | MEMBER_SERVICE_URL | 회원 서비스 접속 URL | |
 | BOOK_SERVICE_URL | 도서 서비스 접속 URL | |
 | TALK_SERVICE_URL | 북톡 서비스 접속 URL | |
-| SPRING_DATA_REDIS_HOST | Redis 호스트 주소 | |
-| SPRING_DATA_REDIS_PORT | Redis 포트 번호 | |
+| COOKIE_DOMAIN | 쿠키 Domain 속성 | 로컬 기본값: 미설정 |
+| COOKIE_SECURE | 쿠키 Secure 속성 | 로컬 기본값: false |
 | SPRING_PROFILES_ACTIVE | 활성 프로파일 | prod |
 
 ## 패키지 구조
@@ -33,8 +32,10 @@ com.quietchatter.gateway/
   AuthenticationFilter.kt
   CorsConfig.kt
   GatewayApplication.kt
+  GatewayCookieProperties.kt
   GatewayHeaderRequestWrapper.kt
   JwtTokenService.kt
+  TokenRefreshClient.kt
   adaptor/in/web/       OpenApiController.kt
   application/          OpenApiAggregatorService.kt
 ```
