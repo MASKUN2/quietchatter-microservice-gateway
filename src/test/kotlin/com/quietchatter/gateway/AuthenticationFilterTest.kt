@@ -21,7 +21,7 @@ class AuthenticationFilterTest {
     private val tokenRefreshClient = mock(TokenRefreshClient::class.java)
     private val objectMapper = ObjectMapper()
     private val cookieProperties = GatewayCookieProperties(domain = null, secure = false, sameSite = "Lax")
-    private val filter = AuthenticationFilter(jwtTokenService, objectMapper, cookieProperties, tokenRefreshClient, 30L, 30L)
+    private val filter = AuthenticationFilter(jwtTokenService, objectMapper, cookieProperties, tokenRefreshClient)
     private val request = mock(HttpServletRequest::class.java)
     private val response = mock(HttpServletResponse::class.java)
     private val filterChain = mock(FilterChain::class.java)
@@ -45,8 +45,9 @@ class AuthenticationFilterTest {
         `when`(request.cookies).thenReturn(arrayOf(refreshCookie))
         `when`(request.getHeader(anyString())).thenReturn(null)
 
-        val rotationResult = TokenRotationResult("new-access", "new-refresh", "member-123")
-        `when`(tokenRefreshClient.rotate("valid-refresh-token")).thenReturn(RefreshOutcome.Success(rotationResult))
+        `when`(tokenRefreshClient.rotate("valid-refresh-token")).thenReturn(
+            RefreshOutcome.Success("member-123", listOf("ACCESS_TOKEN=new-access; Path=/; HttpOnly", "REFRESH_TOKEN=new-refresh; Path=/; HttpOnly"))
+        )
 
         // when
         filter.doFilter(request, response, filterChain)
@@ -119,8 +120,9 @@ class AuthenticationFilterTest {
 
         `when`(jwtTokenService.validateAndGetMemberId("expired-access-token"))
             .thenThrow(ExpiredAuthTokenException("Token expired"))
-        val rotationResult = TokenRotationResult("new-access", "new-refresh", "member-123")
-        `when`(tokenRefreshClient.rotate("valid-refresh-token")).thenReturn(RefreshOutcome.Success(rotationResult))
+        `when`(tokenRefreshClient.rotate("valid-refresh-token")).thenReturn(
+            RefreshOutcome.Success("member-123", listOf("ACCESS_TOKEN=new-access; Path=/; HttpOnly", "REFRESH_TOKEN=new-refresh; Path=/; HttpOnly"))
+        )
 
         // when
         filter.doFilter(request, response, filterChain)

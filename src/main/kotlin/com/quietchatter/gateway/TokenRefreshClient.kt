@@ -2,21 +2,18 @@ package com.quietchatter.gateway
 
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
+import org.springframework.http.HttpHeaders
 import org.springframework.stereotype.Component
 import org.springframework.web.client.HttpClientErrorException
 import org.springframework.web.client.RestClient
 
-data class TokenRotationResult(
-    val accessToken: String,
-    val refreshToken: String,
-    val memberId: String
-)
-
 sealed class RefreshOutcome {
-    data class Success(val result: TokenRotationResult) : RefreshOutcome()
+    data class Success(val memberId: String, val setCookieHeaders: List<String>) : RefreshOutcome()
     data object SessionExpired : RefreshOutcome()
     data object Unavailable : RefreshOutcome()
 }
+
+private data class RefreshResponseBody(val memberId: String)
 
 @Component
 class TokenRefreshClient(
@@ -28,13 +25,15 @@ class TokenRefreshClient(
 
     fun rotate(refreshTokenValue: String): RefreshOutcome {
         return try {
-            val result = restClient.post()
+            val response = restClient.post()
                 .uri("/internal/auth/refresh")
                 .header("X-Internal-Secret", internalSecret)
                 .header("X-Refresh-Token", refreshTokenValue)
                 .retrieve()
-                .body(TokenRotationResult::class.java)
-            if (result != null) RefreshOutcome.Success(result) else RefreshOutcome.SessionExpired
+                .toEntity(RefreshResponseBody::class.java)
+            val memberId = response.body?.memberId ?: return RefreshOutcome.SessionExpired
+            val setCookieHeaders = response.headers[HttpHeaders.SET_COOKIE] ?: emptyList()
+            RefreshOutcome.Success(memberId, setCookieHeaders)
         } catch (e: HttpClientErrorException) {
             RefreshOutcome.SessionExpired
         } catch (e: Exception) {
