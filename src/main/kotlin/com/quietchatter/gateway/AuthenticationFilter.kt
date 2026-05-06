@@ -63,7 +63,7 @@ class AuthenticationFilter(
     ) {
         val refreshToken = extractRefreshToken(request)
         if (refreshToken == null) {
-            errorResponse(response, HttpStatus.UNAUTHORIZED, "TOKEN_EXPIRED", "접근 권한이 만료되었습니다.")
+            filterChain.doFilter(request, response)
             return
         }
 
@@ -72,22 +72,35 @@ class AuthenticationFilter(
             val memberId = jwtTokenService.findMemberIdByRefreshTokenId(tokenId)
 
             if (memberId != null) {
-                // 토큰 갱신
                 val newAccessToken = jwtTokenService.createNewAccessToken(memberId)
                 jwtTokenService.deleteRefreshToken(tokenId)
                 val newRefreshToken = jwtTokenService.createAndSaveRefreshToken(memberId)
 
-                // 쿠키 갱신 및 요청 처리
                 addTokenCookies(request, response, newAccessToken, newRefreshToken)
                 request.setMemberIdHeader(memberId)
                 filterChain.doFilter(request, response)
             } else {
-                errorResponse(response, HttpStatus.UNAUTHORIZED, "TOKEN_EXPIRED", "인증 정보가 만료되었습니다.")
+                clearTokenCookies(request, response)
+                filterChain.doFilter(request, response)
             }
         } catch (e: Exception) {
             log.error("Refresh token validation failed: {}", e.message)
-            errorResponse(response, HttpStatus.UNAUTHORIZED, "TOKEN_EXPIRED", "유효하지 않은 갱신 토큰입니다.")
+            clearTokenCookies(request, response)
+            filterChain.doFilter(request, response)
         }
+    }
+
+    private fun clearTokenCookies(request: HttpServletRequest, response: HttpServletResponse) {
+        val isSecure = request.isSecure
+        val accessCookieHeader = StringBuilder("ACCESS_TOKEN=; Path=/; HttpOnly; Max-Age=0")
+        if (isSecure) accessCookieHeader.append("; Secure")
+        accessCookieHeader.append("; SameSite=Lax")
+        response.addHeader(HttpHeaders.SET_COOKIE, accessCookieHeader.toString())
+
+        val refreshCookieHeader = StringBuilder("REFRESH_TOKEN=; Path=/; HttpOnly; Max-Age=0")
+        if (isSecure) refreshCookieHeader.append("; Secure")
+        refreshCookieHeader.append("; SameSite=Lax")
+        response.addHeader(HttpHeaders.SET_COOKIE, refreshCookieHeader.toString())
     }
 
     private fun addTokenCookies(request: HttpServletRequest, response: HttpServletResponse, accessToken: String, refreshToken: String) {

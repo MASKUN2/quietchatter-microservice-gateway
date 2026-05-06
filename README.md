@@ -64,7 +64,7 @@ AuthenticationFilter(OncePerRequestFilter)가 모든 요청을 검사한다.
 - Forbidden (외부 차단): /internal/** → 403. 서비스 간 내부 통신 전용 경로.
 - 토큰 있음: X-Member-Id 헤더에 memberId(UUID)를 담아 다운스트림으로 전달.
 - 토큰 없음: X-Member-Id 헤더를 전송하지 않음. 빈 문자열이 아닌 헤더 미포함.
-- 토큰 만료: Refresh Token으로 갱신 후 통과. 갱신 불가 시 401.
+- 토큰 만료: Refresh Token으로 갱신 후 통과. 갱신 불가(Redis TTL 만료 포함) 시 만료 쿠키 클리어 후 어나니머스로 통과.
 - 토큰 무효: 401.
 
 인증 필요 여부의 판단은 게이트웨이가 아닌 각 다운스트림 서비스가 담당한다. 인증 필수 엔드포인트는 X-Member-Id 헤더가 없을 때 GlobalExceptionHandler에서 401을 반환한다.
@@ -74,9 +74,10 @@ AuthenticationFilter(OncePerRequestFilter)가 모든 요청을 검사한다.
 1. 외부에서 유입된 X-Member-Id 헤더 강제 제거 (헤더 인젝션 방지)
 2. ACCESS_TOKEN 쿠키 확인 후 없으면 Authorization: Bearer 헤더 확인
 3. Access Token 유효: X-Member-Id에 memberId를 담아 다운스트림으로 전달
-4. Access Token 없음: X-Member-Id 헤더 없이 다운스트림으로 전달
+4. Access Token 없음: X-Member-Id 헤더 없이 다운스트림으로 전달 (어나니머스)
 5. Access Token 만료: REFRESH_TOKEN 쿠키로 Redis 대조 후 토큰 갱신 및 쿠키 재발급
-6. 토큰 무효 또는 갱신 불가: JSON 에러 응답 (401)
+6. 갱신 토큰 없음 또는 Redis 항목 없음(세션 완전 만료): 만료 쿠키 클리어 후 어나니머스로 통과
+7. 토큰 서명 무효: JSON 에러 응답 (401 UNAUTHORIZED)
 
 에러 응답 형식:
 
@@ -87,12 +88,12 @@ AuthenticationFilter(OncePerRequestFilter)가 모든 요청을 검사한다.
   "type": "about:blank",
   "title": "UNAUTHORIZED",
   "status": 401,
-  "detail": "인증이 필요합니다.",
+  "detail": "유효하지 않은 토큰입니다.",
   "instance": "/api/auth/me"
 }
 ```
 
-에러 코드 (title 필드): UNAUTHORIZED (토큰 누락/무효), TOKEN_EXPIRED (갱신 토큰까지 만료), FORBIDDEN (내부 경로 접근)
+에러 코드 (title 필드): UNAUTHORIZED (토큰 서명/형식 무효), FORBIDDEN (내부 경로 접근)
 
 ## 로컬 실행
 
